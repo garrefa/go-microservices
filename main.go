@@ -1,26 +1,48 @@
 package main
 
 import (
-	"fmt"
-	"io"
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"time"
+
+	"github.com/garrefa/go-microservices/handlers"
 )
 
 func main() {
-	http.HandleFunc("/", func(rw http.ResponseWriter, req *http.Request) {
-		log.Println("Hello world!")
-		data, err := io.ReadAll(req.Body)
+	l := log.New(os.Stdout, "product-api ", log.LstdFlags)
+
+	hh := handlers.NewHello(l)
+	gh := handlers.NewGoodbye(l)
+
+	sm := http.NewServeMux()
+	sm.Handle("/", hh)
+	sm.Handle("/goodbye", gh)
+
+	s := &http.Server{
+		Addr:         "127.0.0.1:8080",
+		Handler:      sm,
+		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  1 * time.Second,
+		WriteTimeout: 1 * time.Second,
+	}
+
+	go func() {
+		err := s.ListenAndServe()
 		if err != nil {
-			http.Error(rw, "Ooooops", http.StatusBadRequest)
-			return
+			l.Fatal(err)
 		}
-		fmt.Fprintf(rw, "Hello %s", data)
-	})
+	}()
 
-	http.HandleFunc("/goodbye", func(w http.ResponseWriter, r *http.Request) {
-		log.Println("Goodbye!")
-	})
+	sigChan := make(chan os.Signal)
+	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Kill)
 
-	http.ListenAndServe("127.0.0.1:8080", nil)
+	sig := <-sigChan
+	l.Println("Received terminate, graceful shutdown:", sig)
+
+	tc, _ := context.WithTimeout(context.Background(), 30*time.Second)
+	s.Shutdown(tc)
 }
